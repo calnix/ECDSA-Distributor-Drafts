@@ -1,66 +1,64 @@
-## Foundry
+# Notes
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+## Types
 
-Foundry consists of:
+1. 100% claim 
+2. optional lump sum claim + uniform periodic distribution (weekly, monthly, etc)
+3. option 2, but non-periodic
 
--   **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
--   **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
--   **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
--   **Chisel**: Fast, utilitarian, and verbose solidity REPL.
 
-## Documentation
+Have a merkle root for each claim checkpoint; regardless if its instant, partial instant + distribution.
+Generalize each checkpoint to be a startTime + merkle root - this will cover all options.
 
-https://book.getfoundry.sh/
+Have a global deadline, so that pass this date, no claiming for any round will be allowed.
+Past deadline, can owner can withdraw tokens.
 
-## Usage
 
-### Build
+```solidity
 
-```shell
-$ forge build
+struct RoundData {
+    uint256 startTime;
+    bytes32 root
+    // uint256 maximumAmountPerUser
+    // uint256 depositedTokens
+    // uint256 claimedTokens
+}
+
+uint256 public currentRound;
+mapping (uint256 round => RoundData roundData) public rounds;
+
 ```
 
-### Test
+## Issue/Considerations
 
-```shell
-$ forge test
+1. What if there are multiple rounds, and user wants to batch claim?
+
+```solidity
+
+ function claim(uint256 amount, bytes32[] calldata merkleProof);
+
+ function claimAll(uint256[] calldata amounts, bytes32[][] calldata merkleProofs)
+
 ```
 
-### Format
+2. What if we don't want to deposit all the tokens at once for multiple rounds?
 
-```shell
-$ forge fmt
+Want to have round-sensitive deposits. So that although round 2 has opened up, ppl can only claim for round 1.
+If 2 rounds are claimable, but we only financed for the earlier round and don't want co-mingling.
+
+```solidity 
+
+function depositTokens(uint256 amount, uint256[] rounds)
+
 ```
 
-### Gas Snapshots
+This means that when depositing we must specify which round we are financing.
 
-```shell
-$ forge snapshot
-```
+Project will handle financing. deposit and withdraw.
+Owner can pause, unpause, whitelist(addr). deadline.
 
-### Anvil
+Minimise operations. 
 
-```shell
-$ anvil
-```
+# USE ECDSA if > 127 users - gas savings
 
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+https://x.com/Jeyffre/status/1807008534477058435
