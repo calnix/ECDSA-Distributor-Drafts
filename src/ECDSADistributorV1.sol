@@ -30,7 +30,7 @@ contract ECDSADistributor is EIP712, Pausable, AccessControl, Ownable2Step {
     
     struct RoundData {
         uint128 startTime;
-        uint128 maximumAmountPerUser;
+        uint128 maxAmountPerUser;
         uint128 depositedTokens;
         uint128 claimedTokens;
     }
@@ -38,19 +38,27 @@ contract ECDSADistributor is EIP712, Pausable, AccessControl, Ownable2Step {
     mapping(uint256 round => RoundData roundData) public allRounds;
     mapping(bytes signature => bool claimed) public hasClaimed;
 
+    uint256 public maxRounds;       // num. of rounds
+    uint256 public lastClaimTime;   // startTime of last round
+
     // errors
     error AlreadyClaimed();
     error RoundNotStarted();
     error ClaimPeriodEnded();
     error AmountHigherThanMax();
     error RoundFullyClaimed();
+    
     error InvalidSignature();
     error ECDSAZeroAddress();
+
+    error EmptyArray();
+    error IncorrectLengths();
 
     // events
     event Claimed(address indexed user, uint128 indexed round, uint128 amount);
     event ClaimedAll(address indexed user, uint128[] indexed rounds, uint128 totalAmount);
     event DeadlineUpdated(uint256 newDeadline);
+    event SetupRounds(uint256 indexed numOfRounds, uint256 indexed totalTokens, uint256 indexed lastClaimTime);
 
     constructor(string memory _name, string memory _version, address token, address storedSigner, address owner) EIP712(_name, _version) Ownable(owner) {
         
@@ -80,7 +88,7 @@ contract ECDSADistributor is EIP712, Pausable, AccessControl, Ownable2Step {
         if(roundData.startTime > block.timestamp) revert RoundNotStarted();
 
         // sanity check: max amt per user
-        if (amount > roundData.maximumAmountPerUser) revert AmountHigherThanMax();
+        if (amount > roundData.maxAmountPerUser) revert AmountHigherThanMax();
 
         // sanity check: round not fully claimed
         if (roundData.depositedTokens == roundData.claimedTokens) revert RoundFullyClaimed(); 
@@ -113,8 +121,8 @@ contract ECDSADistributor is EIP712, Pausable, AccessControl, Ownable2Step {
         uint256 amountsLength = amounts.length;
         uint256 signaturesLength = signatures.length;
 
-        require(roundsLength == amountsLength && roundsLength == signaturesLength, "Incorrect legnths");
-        require(roundsLength > 0, "Empty array");
+        if(roundsLength == amountsLength && roundsLength == signaturesLength) revert IncorrectLengths(); 
+        if(roundsLength == 0) revert EmptyArray(); 
 
         uint128 totalAmount;
         for(uint256 i = 0; i < roundsLength; ++i) {
@@ -133,7 +141,7 @@ contract ECDSADistributor is EIP712, Pausable, AccessControl, Ownable2Step {
             if(roundData.startTime > block.timestamp) revert RoundNotStarted();
 
             // sanity check: max amt per user
-            if (amount > roundData.maximumAmountPerUser) revert AmountHigherThanMax();
+            if (amount > roundData.maxAmountPerUser) revert AmountHigherThanMax();
 
             // sanity check: round not fully claimed
             if (roundData.depositedTokens == roundData.claimedTokens) revert RoundFullyClaimed(); 
@@ -164,8 +172,47 @@ contract ECDSADistributor is EIP712, Pausable, AccessControl, Ownable2Step {
             if(signer == address(0)) revert ECDSAZeroAddress(); // note: is this needed given the earlier
     }
 
+    // note: only callable once?
+    function setupRounds(uint128[] calldata startTimes, uint128[] calldata maxAmountPerUsers, uint128[] calldata depositedTokens) external onlyOwner {
+
+        uint256 startTimesLength = startTimes.length;
+        uint256 maxAmountPerUsersLength = maxAmountPerUsers.length;
+        uint256 depositedTokensLength = depositedTokens.length;
+
+        if(startTimesLength == maxAmountPerUsersLength && startTimesLength == depositedTokensLength) revert IncorrectLengths(); 
+        if(startTimesLength == 0) revert EmptyArray(); 
+
+        uint256 totalAmount;
+        for(uint256 i = 0; i < roundsLength; ++i) {
+
+            uint128 startTime = startTimes[i];
+            uint128 maxAmountPerUser = maxAmountPerUsers[i];
+            uint128 depositedToken = depositedTokens[i];
+            
+            RoundData memory roundData = RoundData({startTime: startTime, maxAmountPerUser: maxAmountPerUser, depositedToken: depositedToken});
+
+            totalTokens += depositedToken;
+
+            // update mapping
+            allRounds[i] = roundData;
+        }
+
+        // update
+        maxRounds = startTimesLength;
+        lastClaimTime = startTimes[startTimesLength-1];
+
+        emit SetupRounds(startTimesLength, totalTokens, startTime[startTimesLength-1]);
+
+    }
+
+    //note: deadline must be after last claim round?
     function updateDeadline(uint256 newDeadline) external onlyOwner {
         require(block.timestamp < newDeadline, "Invalid deadline");
+
+        // check last claim time
+        lastRoundIndex = maxRounds - 1;
+        allRounds[]
+
 
         deadline = newDeadline;
         emit DeadlineUpdated(newDeadline);
@@ -183,6 +230,8 @@ contract ECDSADistributor is EIP712, Pausable, AccessControl, Ownable2Step {
         require(msg.sender == operator, "Incorrect caller");
 
     }
+
+    // project stupid then finance to wrong round, need to take out and resend - how?
 
 
     /*//////////////////////////////////////////////////////////////
