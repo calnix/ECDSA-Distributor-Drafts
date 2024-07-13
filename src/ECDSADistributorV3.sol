@@ -12,7 +12,7 @@ import {AccessControl} from "openzeppelin-contracts/contracts/access/AccessContr
 
 //import {ReentrancyGuard} from "@looksrare/contracts-libs/contracts/ReentrancyGuard.sol";
 
-contract ECDSADistributorV2 is EIP712, Pausable, AccessControl, Ownable2Step {
+contract ECDSADistributorV3 is EIP712, Pausable, AccessControl, Ownable2Step {
     using SafeERC20 for IERC20;
 
     // token
@@ -34,16 +34,13 @@ contract ECDSADistributorV2 is EIP712, Pausable, AccessControl, Ownable2Step {
         uint256 totalAmount;         //totalTokens for all rounds
     }
     
-    struct RoundData {
-        uint128 startTime;
-        uint128 pcntReleased;   // pct values, 7211 ->  7211/percentage_precision ->  7.211%
-        uint128 depositedTokens;
-        uint128 claimedTokens;
-    }
+    //mapping(uint256 round => RoundData roundData) public allRounds;
+    uint256[] public startTimes;
+    uint256[] public pcntReleased;       // pct values, 7211 ->  7211/percentage_precision ->  7.211%
+    uint256[] public depositedTokens;
+    uint256[] public claimedTokens;
 
     mapping(address user => uint256 claimedAmount) public claimed;
-
-    mapping(uint256 round => RoundData roundData) public allRounds;
     mapping(bytes signature => bool claimed) public hasClaimed;
 
     uint256 public numberOfRounds;   // immutable: check probability of adding rounds   
@@ -70,7 +67,7 @@ contract ECDSADistributorV2 is EIP712, Pausable, AccessControl, Ownable2Step {
 
 // ------ events --------------
     event Claimed(address indexed user, uint256 indexed round, uint256 amount);
-    event ClaimedMultiple(address indexed user, uint128[] indexed rounds, uint128 totalAmount);
+    event ClaimedAll(address indexed user, uint128[] indexed rounds, uint128 totalAmount);
     event DeadlineUpdated(uint256 newDeadline);
     event SetupRounds(uint256 indexed numOfRounds, uint256 indexed totalTokens, uint256 indexed lastClaimTime);
 // ----------------------------------------
@@ -90,7 +87,7 @@ contract ECDSADistributorV2 is EIP712, Pausable, AccessControl, Ownable2Step {
     function claim(uint256 round, uint256 totalAmount, bytes calldata signature) external whenNotPaused {
 
         // check that deadline as not been exceeded; if deadline has been defined
-        if (deadline > 0) {
+        if(deadline > 0) {
             if (block.timestamp >= deadline) {
                 revert DeadlineExceeded();
             }
@@ -102,37 +99,34 @@ contract ECDSADistributorV2 is EIP712, Pausable, AccessControl, Ownable2Step {
         // sig.verification
         _claim(totalAmount, signature);
 
-        // get storage
-        RoundData memory roundData = allRounds[round];
+        // get storage: startTime + pcnt
+        uint256 startTime = startTimes[round];
+        uint256 pcnt = pcntReleased[round];
+        uint256 depositForRound = depositedTokens[round];
+        uint256 claimedForRound = claimedTokens[round];
 
         // check that round has begun
-        if (roundData.startTime > block.timestamp) revert RoundNotStarted();
+        if(startTime > block.timestamp) revert RoundNotStarted();
 
         // sanity check: round not fully claimed
-        if (roundData.depositedTokens == roundData.claimedTokens) revert RoundFullyClaimed(); 
+        if (depositForRound == claimedForRound) revert RoundFullyClaimed(); 
 
         // calc. what is claimable for this round
-        uint256 claimableForRound = (totalAmount * roundData.pcntReleased) / PERCENTAGE_PRECISION;
-        if(totalAmount < claimableForRound) revert IncorrectAmount();   //sanity check
+        uint256 claimableForRound = (totalAmount * pcnt) / PERCENTAGE_PRECISION;
+        if(totalAmount > claimableForRound) revert IncorrectAmount();   //sanity check
 
         // update round data: increment claimedTokens
-        roundData.claimedTokens += claimableForRound;
+        claimedTokens += claimableForRound;
 
         // update storage
+        hasClaimed[signature] = true;
         allRounds[round] = roundData;
-        claimed[msg.sender] += claimableForRound;       //note: maybe do something of check w/ this against totalAmount
-
-        // last round check: mark signature
-        if (round == numberOfRounds) {
-            hasClaimed[signature] = true;
-        }
         
         emit Claimed(msg.sender, round, claimableForRound);
 
         TOKEN.safeTransfer(msg.sender, claimableForRound);
     }
 
-    //Note: can use to claim  all or just multiple rounds
     function claimMultiple(uint256[] calldata rounds, uint256 totalAmount, bytes calldata signature) external whenNotPaused {
 
         // check that deadline as not been exceeded; if deadline has been defined
@@ -154,9 +148,9 @@ contract ECDSADistributorV2 is EIP712, Pausable, AccessControl, Ownable2Step {
 
         uint256 totalClaimable;
         for(uint256 i = 0; i < numOfRounds; ++i) {
-             
+            
             // get round no. & round data
-            uint256 round = rounds[i];
+            uint128 round = rounds[i];
             RoundData memory roundData = allRounds[round];
 
             // check that round has begun
@@ -164,7 +158,7 @@ contract ECDSADistributorV2 is EIP712, Pausable, AccessControl, Ownable2Step {
             // sanity check: round not fully claimed
             if (roundData.depositedTokens == roundData.claimedTokens) revert RoundFullyClaimed(); 
             
-            
+
             uint256 claimableForRound = (totalAmount * roundData.pcntReleased) / PERCENTAGE_PRECISION;
 
             // update round data: increment claimedTokens
@@ -173,9 +167,9 @@ contract ECDSADistributorV2 is EIP712, Pausable, AccessControl, Ownable2Step {
 
             totalClaimable += claimableForRound;
         }
-        
+
         //sanity check
-        if(totalAmount < totalClaimable) revert IncorrectAmount();      
+        if(totalAmount < totalClaimable) revert IncorrectAmount();   
 
         // update storage: user's claimed amt
         claimed[msg.sender] += totalClaimable;
@@ -185,7 +179,7 @@ contract ECDSADistributorV2 is EIP712, Pausable, AccessControl, Ownable2Step {
             hasClaimed[signature] = true;
         }
 
-        emit ClaimedMultiple(msg.sender, rounds, totalClaimable);
+        emit ClaimedAll(msg.sender, rounds, totalClaimable);
         
         TOKEN.safeTransfer(msg.sender, totalClaimable);
 

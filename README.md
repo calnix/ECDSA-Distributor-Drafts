@@ -77,7 +77,7 @@ https://x.com/Jeyffre/status/1807008534477058435
     
     
 
-    struct User {
+    struct Claim {
         address user;
         uint128 totalAllocation;
     }

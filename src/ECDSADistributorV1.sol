@@ -56,7 +56,7 @@ contract ECDSADistributor is EIP712, Pausable, AccessControl, Ownable2Step {
 
     // events
     event Claimed(address indexed user, uint128 indexed round, uint128 amount);
-    event ClaimedAll(address indexed user, uint128[] indexed rounds, uint128 totalAmount);
+    event ClaimedMultiple(address indexed user, uint128[] indexed rounds, uint128 totalAmount);
     event DeadlineUpdated(uint256 newDeadline);
     event SetupRounds(uint256 indexed numOfRounds, uint256 indexed totalTokens, uint256 indexed lastClaimTime);
 
@@ -71,30 +71,30 @@ contract ECDSADistributor is EIP712, Pausable, AccessControl, Ownable2Step {
     //////////////////////////////////////////////////////////////*/
 
     function claim(uint128 round, uint128 amount, bytes calldata signature) external whenNotPaused {
-        
-        // check that signature has already been used: replay attack protection
-        if (hasClaimed[signature]) revert AlreadyClaimed();
 
         // check that deadline as not been exceeded; if deadline has been defined
-        if(deadline > 0) {
+        if (deadline > 0) {
             if (block.timestamp >= deadline) {
                 revert ClaimPeriodEnded();
             }
         }
-        
+
+        // check that signature has already been used: replay attack protection
+        if (hasClaimed[signature]) revert AlreadyClaimed();
+       
+        // sig.verification
+        _claim(round, amount, signature);
+
         RoundData memory roundData = allRounds[round];
 
         // check that round has begun
-        if(roundData.startTime > block.timestamp) revert RoundNotStarted();
+        if (roundData.startTime > block.timestamp) revert RoundNotStarted();
 
         // sanity check: max amt per user
         if (amount > roundData.maxAmountPerUser) revert AmountHigherThanMax();
 
         // sanity check: round not fully claimed
         if (roundData.depositedTokens == roundData.claimedTokens) revert RoundFullyClaimed(); 
-
-        // sig.verification
-        _claim(round, amount, signature);
 
         // update round data: increment claimedTokens
         roundData.claimedTokens += amount;
@@ -108,7 +108,7 @@ contract ECDSADistributor is EIP712, Pausable, AccessControl, Ownable2Step {
         TOKEN.safeTransfer(msg.sender, amount);
     }
 
-    function claimAll(uint128[] calldata rounds, uint128[] calldata amounts, bytes[] calldata signatures) external whenNotPaused {
+    function claimMultiple(uint128[] calldata rounds, uint128[] calldata amounts, bytes[] calldata signatures) external whenNotPaused {
 
         // check that deadline as not been exceeded; if deadline has been defined
         if(deadline > 0) {
@@ -158,7 +158,7 @@ contract ECDSADistributor is EIP712, Pausable, AccessControl, Ownable2Step {
             allRounds[round] = roundData;
         }
         
-        emit ClaimedAll(msg.sender, rounds, totalAmount);
+        emit ClaimedMultiple(msg.sender, rounds, totalAmount);
 
         TOKEN.safeTransfer(msg.sender, totalAmount);
     }
